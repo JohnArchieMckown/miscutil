@@ -1,0 +1,90 @@
+*PROCESS ALIGN,COMPAT(MACROCASE,NOCASE),DXREF,FLAG(ALIGN,CONT,RECORD)
+*PROCESS NOFOLD,NOINFO,PC(ON,DATA,GEN,MCALL)
+*PROCESS RA2,NORLD,MXREF,RXREF,USING(MAP,WARN(13))
+*WARNING - THIS PROGRAM REQUIRES THE HIGH-LEVEL ASSEMBLER
+*          AS WELL AS LE/370
+*          THIS PROGRAM IS RE-ENTRANT.
+         PUSH  PRINT
+         PRINT NOGEN
+         IEABRCX DEFINE
+         IEABRCX DISABLE
+         IEABRCX ENABLE
+         POP   PRINT
+         YREGS
+$        CEEENTRY PPA=$_PPA,                                           X
+               MAIN=YES,                                               X
+               AUTO=DSASIZE,                                           X
+               BASE=R11
+         DROP  R11
+         USING CEECAA,R12
+         USING CEEDSA,R13
+         LARL  R10,LTORG
+         USING LTORG,R10
+         J     GO
+GOBACK   DS    0H
+         CEETERM RC=RETURN_CODE,                                       X
+               MF=(E,CEETERM_BLOCK)
+*              MODIFIER=MODIFIER
+GO       DS    0H
+         SYSSTATE AMODE64=NO,ARCHLVL=2
+*        STORAGE OBTAIN,LENGTH=WORKLEN
+         LA    R1,PLIST
+         CALL  CEE3INF,(SYS,ENV,MEMBER,GPID,FC),VL,MF=(E,(1))
+         XC    RETURN_CODE,RETURN_CODE
+         XC    MODIFIER,MODIFIER
+         J     GOBACK
+LTORG    DS    0D
+         LTORG *
+$_PPA    CEEPPA LIBRARY=NO,                                            X
+               PPA2=YES,                                               X
+               EXTPROC=YES,                                            X
+               TSTAMP=YES,                                             X
+               PEP=YES,                                                X
+               INSTOP=NO,                                              X
+               EXITDSA=NO,                                             X
+               OWNEXM=YES,                                             X
+               EPNAME=$,                                               X
+               VER=1,                                                  X
+               REL=1,                                                  X
+               MOD=0,                                                  X
+               DSA=YES
+         CEEDSA
+* DYNAMIC AREA IS DEFINED HERE.
+* THIS IS WITHIN A DSECT, SO NO DATA IS REALLY INITIALIZED
+SYS      DS    F
+* BIT MEANING
+*    0
+*    CURRENTLY EXECUTING IN THE CICS ENVIRONMENT
+*    1
+*    CURRENTLY EXECUTING IN A CICS_PIPI ENVIRONMENT
+*    2-3
+*    RESERVED FOR OTHER SPECIFIC CICS ENVIRONMENTS
+*    4
+*    CURRENTLY EXECUTING IN A TSO ENVIRONMENT
+*    5
+*    CURRENTLY EXECUTING IN A BATCH ENVIRONMENT
+*    6
+*    CURRENTLY EXECUTING IN A Z/OS UNIX ENVIRONMENT
+*    7-28
+*    RESERVED FOR FUTURE USE
+*    29
+*    CURRENTLY EXECUTING ON Z/VSE(TM)
+*    30
+*    CURRENTLY EXECUTING ON Z/OS
+*    31
+*    PREVIOUSLY INDICATED AS EXECUTING ON Z/OS.E
+*
+ENV      DS    F
+*
+MEMBER   DS    F
+*
+GPID     DS    F
+FC       DS    F
+RETURN_CODE DS F
+MODIFIER DS    F
+PLIST    DS    20F
+CEETERM_BLOCK CEETERM MF=L
+         DS    6F
+DSASIZE  EQU   *-CEEDSA
+         CEECAA
+         END   $

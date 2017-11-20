@@ -1,0 +1,228 @@
+*PROCESS ALIGN,COMPAT(MACROCASE,NOCASE),DXREF,FLAG(ALIGN,CONT,RECORD)
+*PROCESS NOFOLD,NOINFO,PC(ON,DATA,GEN,MCALL)
+*PROCESS RA2,NORLD,MXREF,RXREF,USING(MAP,WARN(13))
+*WARNING - THIS PROGRAM REQUIRES THE HIGH-LEVEL ASSEMBLER
+*          AS WELL AS LE/370
+*          THIS PROGRAM IS RE-ENTRANT.
+*          THIS PROGRAM USES SOME C LANGUAGE SUBROUTINES
+         PUSH  PRINT
+         PRINT NOGEN
+         IEABRCX DEFINE
+         IEABRCX DISABLE
+         IEABRCX ENABLE
+         POP   PRINT
+         YREGS
+         GBLC  &NULL,NL
+         GBLA  &READLEN
+&NULL    SETC  BYTE(0)
+&NL      SETC  BYTE(21) EBCDIC "NEW LINE" CHARACTER
+&READLEN SETA  32768   LENGTH OF I/O BUFFER FOR READMEMBER
+IEFPRMLB CEEENTRY PPA=IEFPRMLB_PPA,                                    X
+               MAIN=YES,                                               X
+               AUTO=DSASIZE,                                           X
+               BASE=R11
+         DROP  R11
+         USING CEECAA,R12
+         USING CEEDSA,R13
+         LARL  R10,KONSTANTS
+         USING KONSTANTS,R10
+         J     GO
+GOBACK   DS    0H
+         CEETERM RC=RETURN_CODE,                                       X
+               MF=(E,CEETERM_BLOCK)
+*              MODIFIER=MODIFIER
+GO       DS    0H
+         MVI   SWITCH,1
+         SYSSTATE AMODE64=NO,ARCHLVL=2
+*        STORAGE OBTAIN,LENGTH=WORKLEN
+         LA    R1,PLIST
+         CALL  CEE3INF,(SYS,ENV,MEMBER,GPID,FC),VL,MF=(E,(1))
+         XC    RETURN_CODE,RETURN_CODE
+         XC    MODIFIER,MODIFIER
+*
+* use C language fopen() to open the SYSPRINT DD
+         L     R15,FOPEN
+         LA    R1,PLIST
+         CALL  (15),(DD_SYSPRINT,WRITE),VL,MF=(E,(1))
+         LTR   R15,R15 Test the return code
+         JZ    *+2     Force abend if == 0
+         ST    R15,FILEPTR Save the FILE *
+TSTLP2   DS    0H
+*
+* Do an IEFPRMLB REQUEST=ALLOCATE to allocate the PARMLIB DD.
+* Note that the allocate will fail if the PARMLIB DD is already
+* allocated. This is "goodness" in that it allows me to use
+* the macro to try to allocate the system PARMLIB concatenation,
+* but default to the user's PARMLIB if they put one in the JCL.
+         MVI   SWITCH,1
+         MVC   PARMDD,=CL8'PARMLIB'
+         LA    R1,PLIST
+         IEFPRMLB REQUEST=ALLOCATE,                                    X
+               S99RB=NO,                                               X
+               MOUNT=NO,                                               X
+               CALLERNAME=CNAME,                                       X
+               ALLOCDDNAME=PARMDD,                                     X
+               MF=(E,(1),COMPLETE)
+         LTR   R15,R15
+         JZ    ARND1
+         MVI   SWITCH,0
+         JZ    ARND2
+ARND1    DS    0H
+* See if we can do a READMEMBER - will fail if PARMLIB DD not allocated
+         STORAGE OBTAIN,                                               X
+               LENGTH=&READLEN,                                        X
+               SP=1,                                                   X
+               BNDRY=PAGE,                                             X
+               LOC=(31,31)
+         ST    R1,STORAGE
+ARND2    DS    0H
+         USING PRM_READ_BUFFER,R1
+         MVC   PRM_READ_BUFF_SIZE,=A(&READLEN)
+         DROP  R1
+         L     R9,STORAGE
+         LA    R1,PLIST
+         IEFPRMLB REQUEST=READMEMBER,                                  X
+               DDNAME=PARMDD,                                          X
+               CALLERNAME=CNAME,                                       X
+               MEMNAME=MEMNAME, /* HARD CODED TO "TSOKEY00" */         X
+               READBUF=((9)),                                          X
+               BLANK72=NO,                                             X
+               MSG=YES,                                                X
+               RETMSG=NO,                                              X
+               CONSOLID=NOCONSID,                                      X
+               MF=(E,(1),COMPLETE)
+         ST    R15,RETURN_CODE
+         ST    R0,MODIFIER
+         LTR   R2,R15
+         LR    R3,R0
+         L     R1,STORAGE
+         USING PRM_READ_BUFFER,R1
+         L     R4,PRM_RECORDS_READ_COUNT
+         L     R5,PRM_TOTAL_RECORDS
+         L     R6,PRM_BUFF_SIZE_NEEDED
+         DROP  R1
+         L     R15,FPRINTF
+         LA    R1,PLIST
+         L     R7,FILEPTR
+*
+* R7 - FILE * POINTER TO "SYSPRINT"
+* RMRESULT - CHAR * TO FPRINT FORMAT STRING
+* R2 - RETURN CODE FROM READMEMBER
+* R3 - REASON CODE FROM READMEMBER
+* R4 - NUMBER OF RECORDS READ
+* R5 - TOTAL NUMBER OF RECORDS IN MEMBER (SHOULD EQUAL ABOVE)
+* R6 - BUFFER SIZE NEED TO READ THE TOTAL NUMBER OF RECORDS
+         CALL  (15),((7),RMRESULT,(2),(3),(4),(5),(6)),VL,MF=(E,(1))
+         LTR   R4,R4
+         JZ    NOLINES
+         L     R1,STORAGE
+         USING PRM_READ_BUFFER,R1
+         LA    R6,PRM_RECORDS
+         DROP  R1
+PRINTLNE DS    0H
+         L     R15,FPRINTF
+         LA    R1,PLIST
+         CALL  (15),((7),PRINTSTR,(6)),VL,MF=(E,(1))
+         LA    R6,80(,R6) SINCE ALL RECORDS ARE 80 BYTES
+         BCT   R4,PRINTLNE
+NOLINES  DS    0H
+         LA    R1,PLIST
+         IEFPRMLB REQUEST=FREE,                                        X
+               DDNAME=PARMDD,                                          X
+               CALLERNAME=CNAME,                                       X
+               MF=(E,(1),COMPLETE)
+         LTR   R15,R15
+         JNZ   CLOSEOUT
+         CLI   SWITCH,1
+         JNE   TSTLP2
+CLOSEOUT DS    0H
+*
+* use C language fclose() to close the SYSPRINT DD
+         L     R15,FCLOSE
+         LA    R1,PLIST
+         L     R2,FILEPTR
+         CALL  (15),((R2)),VL,MF=(E,(1))
+         L     R1,STORAGE
+         STORAGE RELEASE,                                              X
+               LENGTH=&READLEN,                                        X
+               SP=1,                                                   X
+               ADDR=((1))
+         J     GOBACK
+KONSTANTS DS   0D
+         LTORG *
+FOPEN    DC    V(FOPEN)
+FCLOSE   DC    V(FCLOSE)
+FPRINTF  DC    V(FPRINTF)
+DD_SYSPRINT DC C'//DD:SYSPRINT&NULL'
+CNAME    DC    CL16'TSSO    4.3.1   '
+MEMNAME  DC    CL8'TSOKEY00'
+WRITE    DC    C'w&NULL'
+RMRESULT DC    C'READMEMBER RC=%d RSN=%#8.8x '
+         DC    C'Records read=%d '
+         DC    C'Total Records in member=%d '
+         DC    C'Buffer Size required=%#8.8x '
+         DC    C'&NL'
+         DC    C'&NULL' End of C string indicator
+PRINTSTR DC    C'%80.80s&NL',C'&NULL'
+IEFPRMLB_PPA CEEPPA LIBRARY=NO,                                        X
+               PPA2=YES,                                               X
+               EXTPROC=YES,                                            X
+               TSTAMP=YES,                                             X
+               PEP=YES,                                                X
+               INSTOP=NO,                                              X
+               EXITDSA=NO,                                             X
+               OWNEXM=YES,                                             X
+               EPNAME=IEFPRMLB,                                        X
+               VER=1,                                                  X
+               REL=1,                                                  X
+               MOD=0,                                                  X
+               DSA=YES
+         CEEDSA
+* DYNAMIC AREA IS DEFINED HERE.
+* THIS IS WITHIN A DSECT, SO NO DATA IS REALLY INITIALIZED
+SYS      DS    F
+* BIT MEANING
+*    0
+*    CURRENTLY EXECUTING IN THE CICS ENVIRONMENT
+*    1
+*    CURRENTLY EXECUTING IN A CICS_PIPI ENVIRONMENT
+*    2-3
+*    RESERVED FOR OTHER SPECIFIC CICS ENVIRONMENTS
+*    4
+*    CURRENTLY EXECUTING IN A TSO ENVIRONMENT
+*    5
+*    CURRENTLY EXECUTING IN A BATCH ENVIRONMENT
+*    6
+*    CURRENTLY EXECUTING IN A Z/OS UNIX ENVIRONMENT
+*    7-28
+*    RESERVED FOR FUTURE USE
+*    29
+*    CURRENTLY EXECUTING ON Z/VSE(TM)
+*    30
+*    CURRENTLY EXECUTING ON Z/OS
+*    31
+*    PREVIOUSLY INDICATED AS EXECUTING ON Z/OS.E
+*
+ENV      DS    F
+*
+MEMBER   DS    F
+*
+GPID     DS    F
+FC       DS    F
+RETURN_CODE DS F
+MODIFIER DS    F
+FILEPTR  DS    A
+STORAGE  DS    A
+PARMDD   DS    CL8
+PLIST    DS    20F
+RECORD   DS    CL80,CL1
+SWITCH   DS    X
+CEETERM_BLOCK CEETERM MF=L
+         DS    6F
+DSASIZE  EQU   *-CEEDSA
+         CEECAA
+         IEFZPMAP DSECT=YES,                                           X
+               PRM_LIST_BUFFER=NO,                                     X
+               PRM_READ_BUFFER=YES,                                    X
+               PRM_MESSAGE_BUFFER=NO
+         END   IEFPRMLB
