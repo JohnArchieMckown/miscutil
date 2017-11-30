@@ -1,0 +1,227 @@
+*PROCESS ALIGN,COMPAT(MACROCASE,NOCASE),DXREF,FLAG(ALIGN,CONT,RECORD)
+*PROCESS NOFOLD,NOINFO,PC(ON,DATA,GEN,MCALL),RENT,
+*PROCESS RA2,NORLD,MXREF,RXREF,USING(MAP,WARN(13))
+*PROCESS TYPECHECK(MAGNITUDE,REGISTER)
+*WARNING - THIS PROGRAM REQUIRES THE HIGH-LEVEL ASSEMBLER
+*          AS WELL AS LE/370
+*          THIS PROGRAM IS RE-ENTRANT.
+         PUSH  PRINT
+         PRINT NOGEN
+         IEABRCX DEFINE
+*        IEABRCX DISABLE
+         IEABRCX ENABLE
+*EE3INF  XATTR SCOPE(MODULE),REFERENCE(DIRECT),REFERENCE(CODE)
+*        EXTRN CEE3INF
+*PX1SYC  XATTR SCOPE(MODULE),REFERENCE(DIRECT),REFERENCE(CODE)
+*        EXTRN BPX1SYC
+*PX1SDD  XATTR SCOPE(MODULE),REFERENCE(DIRECT),REFERENCE(CODE)
+*        EXTRN BPX1SDD
+*PX1GCW  XATTR SCOPE(MODULE),REFERENCE(DIRECT),REFERENCE(CODE)
+*        EXTRN BPX1GCW
+*PX1EXM  XATTR SCOPE(MODULE),REFERENCE(DIRECT),REFERENCE(CODE)
+         EXTRN BPX1EXM
+         EXTRN SNPRINTF
+         POP   PRINT
+         IAZYREG
+         SYSSTATE ARCHLVL=2,ASCENV=ANY
+TEXECMVS CEEENTRY PPA=TEXECMVS_PPA,                                    X
+               MAIN=YES,                                               X
+               AUTO=DSASIZE,                                           X
+               RMODE=31,                                               X
+               AMODE=31,                                               X
+               BASE=R11
+         DROP  R11
+         LARL  R11,KONSTNTS
+         USING KONSTNTS,R11
+         USING CEECAA,R12
+         USING CEEDSA,R13
+         J     GO
+GOBACK   DS    0H
+         CEETERM RC=RETURN_CODE,                                       X
+               MF=(E,CEETERM_BLOCK)
+*              MODIFIER=MODIFIER
+GO       DS    0H
+         L     R8,0(,R1)
+         LH    R9,0(,R8)
+*        WTO   'TEXECMVS IAZXJSAB ENTER',ROUTCDE=11
+         IAZXJSAB READ,                                                X
+               WORKID=#WORKID,                                         X
+               JOBID=#JOBID,                                           X
+               JOBNAME=#JOBNAME,                                       X
+               USERID=#USERID,                                         X
+               EXECST=#EXECST
+*        WTO   'TEXECMVS IAZXJSAB EXIT',ROUTCDE=11
+         USING PSA,0
+         L     R1,PSAAOLD
+         DROP  0
+         USING ASCB,R1
+         LH    R3,ASCBASID
+         DROP  R1
+*        WTO   'TEXECMVS SNPRINTF ENTER',ROUTCDE=11
+         LARL  R15,SNPRINTF
+         LA    R1,CALLX
+         LHI   R0,LFORMAT
+         STH   R0,WTOMSG
+         LA    R2,WTOMSG+2       WHERE TO PUT STRING
+         CEEPCALL (15),((2),                                           X
+               126, YES, A PLAIN NUMBER                                X
+               FORMAT,                                                 X
+               (3),               ASID                                 X
+               #WORKID,                                                X
+               #JOBID,                                                 X
+               #JOBNAME,                                               X
+               #USERID),VL,MF=(E,(1))
+*        WTO   'TEXECMVS SNPRINTF EXIT',ROUTCDE=11
+         LA    R1,CALLX
+         MVC   0(LWTOL,R1),WTOL
+         WTO   TEXT=WTOMSG,                                            X
+               ROUTCDE=11,                                             X
+               MF=(E,(1))
+         LTR   R9,R9         ANY PARM?
+         JZ    GOBACK        NO
+         CHI   R9,LPARM      PARM CORRECT LENGTH?
+         JNE   GOBACK        NO
+         CLC   VPARM,2(R8)   PARM CORRECT VALUE?
+         JZ    GOBACK
+         LA    R1,CALLX
+         LARL  R15,BPX1EXM
+*        L     R15,=V(BPX1EXM)
+         LTR   R15,R15
+         JZ    DOWTO
+         CEEPCALL (15),(PGMNAMEL,                                      X
+               PGMNAME,                                                X
+               FULLWORD0,    PARM LENGTH==0                            X
+               FULLWORD0,    DOESN'T MATTER SINCE PARMLEN==0           X
+               FULLWORD0,    EXIT ROUTINE (NONE)                       X
+               FULLWORD0,    EXIT ROUTINE PARM POINTER (NONE)          X
+               RETURN_VALUE,                                           X
+               RETURN_CODE,                                            X
+               REASON_CODE),VL,                                        X
+               LINKINST=BASR,                                          X
+               MF=(E,(1))
+         L     R4,RETURN_VALUE
+         L     R5,RETURN_CODE
+         L     R6,REASON_CODE
+         DC    H'0' FORCE ABEND, BUT SHOULDN'T GET HERE.
+         J     GOBACK
+DOWTO    DS    0H
+         WTO   'TEXECMVS R15 IS ZERO',ROUTCDE=11
+         J     GOBACK
+KONSTNTS DS    0D
+         LTORG *
+FULLWORD0 DC   F'0'
+PGMNAMEL  DC   F'8'
+PGMNAME   DC   CL8'TEXECMVS'
+DUB_SETTING DC A(DUBTHREAD)
+$C_VERSION DC  A(SC_VERSION)
+WTOL     WTO   TEXT=,ROUTCDE=11,MF=L
+LWTOL    EQU   *-WTOL
+FORMAT   DC    C'TEXECMVS TEST'
+         DC    C' ASID=%d'
+         DC    C' WORKID=%8.8s'
+         DC    C' JOBID=%8.8s'
+         DC    C' JOBNAME=%8.8s'
+         DC    C' USERID=%8.8s'
+LFORMAT  EQU   *-FORMAT
+         DC    X'00'                C end-of-string indicator
+TEXECMVS_PPA CEEPPA LIBRARY=NO,                                        X
+               PPA2=YES,                                               X
+               EXTPROC=YES,                                            X
+               TSTAMP=YES,                                             X
+               PEP=YES,                                                X
+               INSTOP=NO,                                              X
+               EXITDSA=NO,                                             X
+               OWNEXM=YES,                                             X
+               EPNAME=TEXECMVS,                                        X
+               VER=1,                                                  X
+               REL=1,                                                  X
+               MOD=0,                                                  X
+               DSA=YES
+         CEEDSA
+* DYNAMIC AREA IS DEFINED HERE.
+* THIS IS WITHIN A DSECT, SO NO DATA IS REALLY INITIALIZED
+SYS      DS    F
+* BIT MEANING
+*    0
+*    CURRENTLY EXECUTING IN THE CICS ENVIRONMENT
+*    1
+*    CURRENTLY EXECUTING IN A CICS_PIPI ENVIRONMENT
+*    2-3
+*    RESERVED FOR OTHER SPECIFIC CICS ENVIRONMENTS
+*    4
+*    CURRENTLY EXECUTING IN A TSO ENVIRONMENT
+*    5
+*    CURRENTLY EXECUTING IN A BATCH ENVIRONMENT
+*    6
+*    CURRENTLY EXECUTING IN A Z/OS UNIX ENVIRONMENT
+*    7-28
+*    RESERVED FOR FUTURE USE
+*    29
+*    CURRENTLY EXECUTING ON Z/VSE(TM)
+*    30
+*    CURRENTLY EXECUTING ON Z/OS
+*    31
+*    PREVIOUSLY INDICATED AS EXECUTING ON Z/OS.E
+*
+ENV      DS    F
+*
+MEMBER   DS    F
+*
+GPID     DS    F
+FC       DS    F
+XADDR    DS    A
+RETURN_VALUE DS F
+RETURN_CODE DS F
+REASON_CODE DS F
+MODIFIER DS    F
+BUFL     DS    F
+#WORKID  DS    CL8
+#JOBID   DS    CL8
+#JOBNAME DS    CL8
+#USERID  DS    CL8
+#EXECST  DS    D             TOD TIME STAMP
+WTOMSG   DS    H,CL126
+VPARM    DC    C'CONTINUE'
+LPARM    EQU   L'VPARM
+CEETERM_BLOCK CEETERM MF=L
+CALLX    CEEPCALL ,(0,                                                 X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0,                                                      X
+               0),VL,MF=L
+BUFFER   DC    CL255' '
+DSASIZE  EQU   *-CEEDSA
+         BPXYCONS DSECT=YES,LIST=YES
+         CEECAA
+         IAZJSAB
+         IHAPSA
+         IKJTCB
+         IHASTCB
+         IHAASCB
+         IHAASSB
+*        IEANTASM
+         END   TEXECMVS
+         PUNCH ' CHANGE -IMMED,SNPRINTF(@@SNPRTF)'
+         END
