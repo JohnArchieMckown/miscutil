@@ -1,808 +1,808 @@
-MPF2REXX TITLE '- MPF exit to call SYSTEM REXX'                         00010008
-         PRINT GEN                                                      00011008
-*********************************************************************** 00012008
-*                                                                     * 00013008
-* Name: MPF2REXX                                                      * 00014008
-*                                                                     * 00015008
-*      Author: Dana Mitchell   dmitche@shazam.net                     * 00016008
-*                                                                     * 00017008
-* Descritpion: MPF Installation exit to process WTO                   * 00018008
-*              messages using SYSTEM REXX execs                       * 00019008
-*                                                                     * 00020008
-*   Operation: Call a SYSTEM REXX EXEC when the specfied message      * 00030008
-*              is issued.  The default name of the SYSREXX to be      * 00040008
-*              called is the message identifier.  If an alternate     * 00050008
-*              REXX is to be called, specify AUTO(rexxname) on the    * 00060008
-*              MPFLSTxx statement.                                    * 00070008
-*                                                                     * 00080008
-*              Sample MPFLSTxx statements:                            * 00090008
-*                                                                     * 00100008
-*              msgid,USEREXIT(MPF2REXX)                               * 00110008
-*                                                                     * 00120008
-*                    When <msgid> message is issued,  call a System   * 00130008
-*                    Rexx with the name of <msgid>.                   * 00140008
-*                                                                     * 00150008
-*              msgid,USEREXIT(MPF2REXX),AUTO(altrexx)                 * 00160008
-*                                                                     * 00170008
-*                    When <msgid> message is issued,  call a System   * 00180008
-*                    Rexx with the name of <altrexx>.                 * 00190008
-*                                                                     * 00200008
-*       Input: R1->  Address of CTXT                                  * 00210008
-*              R13-> Standard save area                               * 00220008
-*              R14-> Return address                                   * 00230008
-*              R15-> Entry point                                      * 00240008
-*                                                                     * 00250008
-*   Regs used: R2 R6 and R7 work                                      * 00260008
-*              R3  Ptr to WORKDS   workarea                           * 00270008
-*              R4  Ptr to CTXTATTR                                    * 00280008
-*              R5  Ptr to CTXT                                        * 00290008
-*              R12 Base                                               * 00300008
-*              R13 Register save area                                 * 00310008
-*              R14 Return address                                     * 00320008
-*                                                                     * 00330008
-* Fields passed to REXX exec:                                         * 00340008
-*                                                                     * 00350008
-*              MPF2REXXJOB     Job name of issuer                     * 00360008
-*              MPF2REXXJID     Job ID of issuer            @DM11032010* 00361008
-*              MPF2REXXSYS     System name where message originated   * 00362008
-*              MPF2REXXMSG.0   Number of lines returned               * 00363008
-*              MPF2REXXMSG.x   Where x= 1-20 lines of WTO text        * 00364008
-*                                                                     * 00365008
-*                                                                     * 00366008
-*                                                                     * 00367008
-* Change Log                                                          * 00368008
-* ------------------------------------------------------------------- * 00369008
-* Mitchell  9/22/2010 Initial coding                                  * 00370008
-*                                                                     * 00380008
-* Mitchell 10/22/2010 Insert test for valid System Rexx environment.  * 00390008
-*  AXREXX macro fails w/RC 0000000C  RSN 041E0C0F if the AS issuing   * 00400008
-*  the message is not valid for creation of a dependant enclave.      * 00410008
-*  Check for  OUCBIac>0                                               * 00420008
-*                                                                     * 00430008
-* Mitchell @DM11032010 Add CTXTOJBID field passed to REXX             * 00440008
-* Mitchell @DM11112010 Set actual length of MPF2REXXJOB and 'SYS      * 00450008
-*                      fields.                                        * 00460008
-*                                                                     * 00470008
-*********************************************************************** 00471008
-MPF2REXX CSECT                                                          00472008
-MPF2REXX AMODE 31                      31-BIT ADDRESSING MODE           00473008
-MPF2REXX RMODE ANY                     31-BIT RESIDENCE                 00474008
-                                                                        00475008
-* Registers                                                             00476008
-                                                                        00477008
-R0       EQU   0                                                        00478008
-R1       EQU   1             TRT                                        00479008
-R2       EQU   2             TRT                                        00480008
-R3       EQU   3             Work area (dynamic storage)                00490008
-R4       EQU   4             CTXTATTR                                   00500008
-R5       EQU   5             CTXT                                       00510008
-R6       EQU   6             Work                                       00520008
-R7       EQU   7             Work                                       00530008
-R8       EQU   8             Work for REXX areas                        00540008
-R9       EQU   9                                                        00550008
-R10      EQU   10                                                       00560008
-R11      EQU   11                                                       00570008
-R12      EQU   12            BASE                                       00580008
-R13      EQU   13            Save area                                  00590008
-R14      EQU   14                                                       00600008
-R15      EQU   15                                                       00610008
-                                                                        00620008
-* Setup Entry Linkage                                                   00630008
-                                                                        00640008
-         USING *,R12                    Tell assembler                  00650008
-         BAKR  R14,0                    Save regs                       00660008
-         LAE   R12,0(,R15)              Load base                       00670008
-         B     Begin                    Branch around eyecatchers       00680008
-         DC    C'MPF2REXX '                                             00690008
-         DC    C'&SYSDATE &SYSTIME '                                    00700008
-Begin    DS    0H                                                       00710008
-         L     R5,0(R1)                 Get poitner to CTXT             00720008
-         USING CTXT,R5                  use R5                          00730008
-                                                                        00740008
-         TM    CTXTSFB4,CTXTCIDA        Is this termination call?       00750008
-         BO    Return                   Yes-> return                    00760008
-                                                                        00770008
-* Determine type of call                                                00780008
-                                                                        00790008
-         L     R4,CTXTTXPN              Load pointer to minor line      00800008
-         LTR   R4,R4                    Is there a minor line?          00810008
-         BNZ   MinorLine                Yes-> Go process minor line     00820008
-                                                                        00830008
-* Check for valid environment                               @DM10222010 00840008
-                                                                        00850008
-         B     EnvOK          **** Don't check Environment ****         00860008
-                                                                        00870008
-         USING PSA,R0              Point to PSA             @DM10222010 00880008
-         L     R6,PSAAOLD          Point to Current ASCB    @DM10222010 00890008
-         USING ASCB,R6             Use pointer to ASCB      @DM10222010 00900008
-         L     R6,ASCBOUCB         Point to OUCB            @DM10222010 00910008
-         Drop  R6                  Reg is now pointing to OU@DM10222010 00920008
-         USING OUCB,R6             Tell assembler           @DM10222010 00921008
-         CLI   OUCBIAC,x'00'       Is OUCBIAC>0?            @DM10222010 00922008
-         BH    EnvOK               Yes-> Continue           @DM10222010 00923008
-         WTO   'MPF2REXX Invalid environment for System REXX'           00924008
-         B     Return                                       @DM10222010 00925008
-         Drop  R6                                           @DM10222010 00926008
-                                                                        00927008
-* Getmain workarea                                                      00928008
-                                                                        00929008
-EnvOK    DS    0H                                           @DM10222010 00930008
-         GETMAIN RU,LV=WORKLEN,SP=230,LOC=(BELOW,ANY)                   00940008
-         LTR   R15,R15             Getmain OK?                          00950008
-         BZ    GM1OK               Yes-> continue                       00960008
-         WTO   'MPF2REXX Getmain Error'                                 00970008
-         B     Return              Bye                                  00980008
-                                                                        00990008
-GM1OK    DS    0H                                                       01000008
-         LR    R3,R1               Get address of storage               01010008
-         USING WORKDS,R3           Tell assembler                       01020008
-         LA    R13,SAVEAREA        Point to save area                   01030008
-         MVC   SAVEAREA+4,=C'F1SA' Mark stack in use                    01040008
-                                                                        01050008
-* Save various fixed fields from the message header                     01051008
-                                                                        01052008
-         MVC   NumMin,=F'1'        Set beginning number of lines        01053008
-         L     R4,CTXTTXPJ         Load address of ptr to text          01054008
-         USING CTXTATTR,R4         Use this for the base                01055008
-         MVC   VARTMSG,CTXTTMSG    Move in message text                 01056008
-         MVC   VARTLEN,CTXTTLEN    Get Length of message text           01056108
-         MVC   VARJBNM,CTXTJBNM    Move in JOB name                     01056208
-         MVC   VARJBID,CTXTOJBID   Move in JOB ID           @DM11032010 01056308
-         MVC   VARSYSN,CTXTSYSN    Move in system name                  01056408
-                                                                        01056508
-* Get name of exec                                                      01056608
-                                                                        01056708
-         MVC   EXECNAME(8),CTXTTMSG  Move in first 8 chars of text      01056808
-         CLC   CTXTAUTT,=CL8' '      Is any token specified?            01056908
-         BNH   Defname               No-> use name from message text    01057008
-         MVC   EXECNAME,CTXTAUTT     Move in name from auto token       01058008
-Defname  DS    0H                                                       01059008
-                                                                        01060008
-* Determine type of line                                                01070008
-                                                                        01080008
-         TM    CTXTTFB1,CTXTTFMJ   Is this a MLWTO?                     01090008
-         BZ    BuildRexx           No-> go build SYSREXX call           01100008
-         TM    CTXTTFB1,CTXTTFME   Is this the last line?               01110008
-         BO    BuildRexx           Yes-> go build SYSREXX call          01120008
-                                                                        01130008
-* Chain workarea                                                        01140008
-                                                                        01141008
-         MVC   Seqno,CTXTSEQN      Save sequence number of this MSG     01142008
-         L     R15,CTXTIWKP        Point to exit work area              01143008
-                                                                        01144008
-AddWork  DS    0h                                                       01145008
-                                                                        01146008
-         XR    R1,R1               Clear work reg                       01147008
-         CS    R1,R3,0(R15)        Add pointer to chain OK?             01148008
-         BE    ReqMinors           Yes-> go get more minors             01149008
-         LR    R15,R1              No-> point to next minor block       01150008
-         B     AddWork             Go try adding the next block         01160008
-                                                                        01170008
-ReqMinors DS   0H                                                       01180008
-                                                                        01190008
-         OI    CTXTRFB1,CTXTRPML   Request more minors if available     01200008
-         B     Return              Go back                              01210008
-                                                                        01220008
-* Process Minor Line                                                    01230008
-                                                                        01240008
-MinorLine DS    0H                                                      01250008
-                                                                        01260008
-         NI    CTXTRFB1,255-CTXTRPML Turn off request bit               01270008
-         L     R3,CTXTIWKP          Get pointer to exit work area       01280008
-                                                                        01290008
-TryNext  DS    0H                                                       01300008
-                                                                        01310008
-         L     R3,0(R3)             Get pointer to first/next work area 01320008
-         LTR   R3,R3                Is there a work area exist?         01330008
-         BNZ   WorkOK               Yes-> See if its the right one      01340008
-         WTO   'MPF2REXX No workarea found for minor'                   01350008
-         B     Return               Go Back                             01360008
-                                                                        01370008
-WorkOK   Ds    0H                                                       01380008
-                                                                        01390008
-         CLC   Seqno,CTXTSEQN       Is this the right one?              01400008
-         Bne   TryNext              No-> try the next one               01410008
-                                                                        01420008
-* Store message line in work area                                       01430008
-                                                                        01440008
-         LA    R6,VARTMSG           Point to line array                 01450008
-         L     R8,NumMin            Get number of minor lines           01460008
-         CH    R8,=H'20'            Max minor lines reached?            01470008
-         BNL   MinFull              Yes-> Dont add to buffer            01480008
-         MH    R8,=AL2(L'CTXTTMSG)  Find index into table               01490008
-         AR    R6,R8                Point to next entry                 01500008
-         MVC   0(L'CTXTTMSG,R6),CTXTTMSG  Move in message text          01510008
-         L     R8,NumMin            Get number of minor lines           01520008
-         SLA   R8,1                 Multiply by 2                       01530008
-         LA    R6,VARTLEN(R8)       Point to length entry               01540008
-         MVC   0(2,R6),CTXTTLEN     Save length of message              01550008
-         L     R8,NumMin            Get number of minor lines           01560008
-         LA    R8,1(,R8)            Increment number of minors          01570008
-         ST    R8,NumMin            Store number of minors              01580008
-                                                                        01590008
-         TM    CTXTTFB1,CTXTTFME    Is this the END line?               01600008
-         BZ    ReqMinors            No-> Go get more                    01610008
-                                                                        01620008
-MinFull  DS    0H                                                       01630008
-* Remove workarea from chain                                            01640008
-                                                                        01650008
-         L     R1,CTXTIWKP          Point to exit workarea              01660008
-                                                                        01670008
-RemWork  DS    0H                                                       01680008
-                                                                        01690008
-         LR    R15,R3               Point to our workarea               01700008
-         L     R14,NextWrk          Load pointer to next one            01710008
-         CS    R15,R14,0(R1)        Try Removing chain                  01720008
-         BE    BuildRexx            Yes-> Go build REXX request         01730008
-         LR    R1,R15               No-> Point to next one              01740008
-         B     RemWork              Go try to remove it                 01750008
-                                                                        01760008
-* Begin building SYSTEM REXX call areas                                 01770008
-                                                                        01780008
-BuildRexx DS   0H                                                       01790008
-                                                                        01800008
-         XC    RxVarLst,RxVarLst    Clear the VarLst header             01810008
-         LA    R8,RxVarLst                                              01820008
-                                                                        01830008
-* Build headers                                                         01840008
-                                                                        01850008
-         USING AxrArgLst,R8                                             01860008
-         MVC   AxrArgLstId,=A(AxrVarLstAcro) Set it to varible type     01870008
-         MVC   AxrArgLstVer,=A(AxrArgLstCurVer) Set it to version       01880008
-         L     R6,NumMin           Get number of wto lines              01890008
-         LA    R6,ExtraFields(,R6) Add more fields to count             01900008
-         STH   R6,AxrArgLstNumber  Store the number of variables        01910008
-         DROP  R8                                                       01920008
-                                                                        01930008
-* Prepare variable entries                                              01940008
-                                                                        01950008
-        LA     R8,RxVarEnt          Point to first entry                01960008
-        USING  AxrArgEntry,R8                                           01970008
-                                                                        01980008
-* Job name                                                              01990008
-                                                                        02000008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02010008
-         LA    R6,jbnmName          Get address of name                 02020008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02030008
-         MVI   AxrArgNameLength,L'jbnmName                              02040008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02050008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02060008
-         LA    R6,L'VARJBNM         Obtain length (in bytes)            02070008
-         ST    R6,AxrArgLength      Store length in var entry           02071008
-         LA    R6,VARJBNM           Get address of Job name             02072008
-         ST    R6,AXRARGADDRLOW     Store address in arglist            02072108
-         TRT   VARJBNM,TRTTAB       Find length of JOB name @DM11112010 02072208
-         BZ    DefJOB               Job name is default leng@DM11112010 02072308
-         SR    R1,R6                Calculate length        @DM11112010 02072408
-         ST    R1,AxrArgLength      Store length            @DM11112010 02072508
-DefJOB   DS    0H                                           @DM11112010 02072608
-                                                                        02072708
-* Job ID                                                                02072808
-                                                                        02072908
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02073008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02073108
-         LA    R6,VARJBID           Get address of Job ID               02073208
-         ST    R6,AXRARGADDRLOW     Store address in arglist            02073308
-         LA    R6,jbidName          Get address of name                 02073408
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02073508
-         MVI   AxrArgNameLength,L'jbidName                              02073608
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02073708
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02073808
-         LA    R6,L'VARJBID         Obtain length (in bytes)            02073908
-         ST    R6,AxrArgLength      Store length in var entry           02074008
-                                                                        02074108
-* System name                                                           02074208
-                                                                        02074308
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02074408
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02074508
-         LA    R6,sysnName          Get address of name                 02074608
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02074708
-         MVI   AxrArgNameLength,L'sysnName store length of name         02074808
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02074908
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02075008
-         LA    R6,L'VARSYSN         Plug in default length              02075108
-         ST    R6,AxrArgLength      Store length in var entry           02075208
-         LA    R6,VARSYSN           Get address of System name          02075308
-         ST    R6,AXRARGADDRLOW     Store address in arglist            02075408
-         TRT   VARSYSN,TRTTAB       Find length of System na@DM11112010 02075508
-         BZ    DefSYS               Default length          @DM11112010 02075608
-         SR    R1,R6                Calculate length        @DM11112010 02075708
-         ST    R1,AxrArgLength      Store length            @DM11112010 02075808
-DefSYS   DS    0H                                           @DM11112010 02075908
-                                                                        02076008
-* Message text .0                                                       02076108
-                                                                        02076208
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02076308
-         XC    0(AXRARGENTRY_LEN,R8),0(R8)  Clear entry                 02076408
-         LA    R6,NumMin            Get address of varable              02076508
-         ST    R6,AXRARGADDRLOW     Store address in arglist            02076608
-         LA    R6,tmsgNam0          get address of variable name        02076708
-         ST    R6,AXRARGNameADDRLOW Store address of name               02076808
-         MVI   AxrArgNameLength,L'tmsgNam0                              02076908
-         OI    AXRARGINPUTFLGS1,AXRARGInput   input varible             02077008
-         MVI   AxrArgType,AXRARGTYPEUNSIGNED  type is unsigned binary   02078008
-         LA    R6,L'NumMin          Obtain length (in bytes)            02079008
-         ST    R6,AxrArgLength      Store length in var entry           02080008
-                                                                        02090008
-* Message text .1                                                       02100008
-                                                                        02110008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02120008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02130008
-         LA    R7,VARTMSG           Get address of message text line    02140008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02150008
-         LA    R6,tmsgNam1          Get address of name                 02160008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02170008
-         MVI   AxrArgNameLength,L'tmsgNam1                              02180008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02190008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02200008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02210008
-         LH    R6,VARTLEN+0         Obtain length (in bytes)            02220008
-         ST    R6,AxrArgLength      Store length in var entry           02230008
-                                                                        02240008
-* Message text .2                                                       02250008
-                                                                        02260008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02270008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02280008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02290008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02300008
-         LA    R6,tmsgNam2          Get address of name                 02310008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02320008
-         MVI   AxrArgNameLength,L'tmsgNam2                              02330008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02340008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02350008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02360008
-         LH    R6,VARTLEN+2         Obtain length (in bytes)            02370008
-         ST    R6,AxrArgLength      Store length in var entry           02380008
-                                                                        02390008
-* Message text .3                                                       02400008
-                                                                        02410008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02420008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02430008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02440008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02450008
-         LA    R6,tmsgNam3          Get address of name                 02460008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02470008
-         MVI   AxrArgNameLength,L'tmsgNam3                              02480008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02490008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02500008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02510008
-         LH    R6,VARTLEN+4         Obtain length (in bytes)            02520008
-         ST    R6,AxrArgLength      Store length in var entry           02530008
-                                                                        02540008
-* Message text .4                                                       02550008
-                                                                        02560008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02570008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02580008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02590008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02600008
-         LA    R6,tmsgNam4          Get address of name                 02610008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02620008
-         MVI   AxrArgNameLength,L'tmsgNam4                              02630008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02640008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02650008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02660008
-         LH    R6,VARTLEN+6         Obtain length (in bytes)            02670008
-         ST    R6,AxrArgLength      Store length in var entry           02680008
-                                                                        02690008
-* Message text .5                                                       02700008
-                                                                        02710008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02720008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02730008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02740008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02750008
-         LA    R6,tmsgNam5          Get address of name                 02760008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02770008
-         MVI   AxrArgNameLength,L'tmsgNam5                              02780008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02790008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02800008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02810008
-         LH    R6,VARTLEN+8         Obtain length (in bytes)            02811008
-         ST    R6,AxrArgLength      Store length in var entry           02812008
-                                                                        02813008
-* Message text .6                                                       02814008
-                                                                        02815008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02816008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02817008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02818008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02819008
-         LA    R6,tmsgNam6          Get address of name                 02820008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02830008
-         MVI   AxrArgNameLength,L'tmsgNam6                              02840008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             02850008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    02860008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            02870008
-         LH    R6,VARTLEN+10        Obtain length (in bytes)            02880008
-         ST    R6,AxrArgLength      Store length in var entry           02890008
-                                                                        02900008
-* Message text .7                                                       02910008
-                                                                        02920008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          02930008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  02940008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    02950008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            02960008
-         LA    R6,tmsgNam7          Get address of name                 02970008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    02980008
-         MVI   AxrArgNameLength,L'tmsgNam7                              02990008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03000008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03010008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03020008
-         LH    R6,VARTLEN+12        Obtain length (in bytes)            03030008
-         ST    R6,AxrArgLength      Store length in var entry           03040008
-                                                                        03050008
-* Message text .8                                                       03060008
-                                                                        03070008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03080008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03090008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03100008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03110008
-         LA    R6,tmsgNam8          Get address of name                 03120008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03130008
-         MVI   AxrArgNameLength,L'tmsgNam8                              03140008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03150008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03160008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03170008
-         LH    R6,VARTLEN+14        Obtain length (in bytes)            03180008
-         ST    R6,AxrArgLength      Store length in var entry           03190008
-                                                                        03200008
-* Message text .9                                                       03210008
-                                                                        03220008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03230008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03240008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03250008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03260008
-         LA    R6,tmsgNam9          Get address of name                 03270008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03280008
-         MVI   AxrArgNameLength,L'tmsgNam9                              03290008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03300008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03310008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03320008
-         LH    R6,VARTLEN+16        Obtain length (in bytes)            03330008
-         ST    R6,AxrArgLength      Store length in var entry           03340008
-                                                                        03350008
-* Message text .10                                                      03360008
-                                                                        03370008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03380008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03390008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03400008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03410008
-         LA    R6,tmsgNamA          Get address of name                 03420008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03430008
-         MVI   AxrArgNameLength,L'tmsgNamA                              03440008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03450008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03460008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03470008
-         LH    R6,VARTLEN+18        Obtain length (in bytes)            03480008
-         ST    R6,AxrArgLength      Store length in var entry           03490008
-                                                                        03500008
-* Message text .11                                                      03510008
-                                                                        03520008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03530008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03540008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03550008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03560008
-         LA    R6,tmsgNamb          Get address of name                 03570008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03580008
-         MVI   AxrArgNameLength,L'tmsgNamb                              03590008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03600008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03610008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03620008
-         LH    R6,VARTLEN+20        Obtain length (in bytes)            03630008
-         ST    R6,AxrArgLength      Store length in var entry           03640008
-                                                                        03650008
-* Message text .12                                                      03660008
-                                                                        03670008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03680008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03690008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03700008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03710008
-         LA    R6,tmsgNamc          Get address of name                 03720008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03730008
-         MVI   AxrArgNameLength,L'tmsgNamc                              03740008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03750008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03760008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03770008
-         LH    R6,VARTLEN+22        Obtain length (in bytes)            03780008
-         ST    R6,AxrArgLength      Store length in var entry           03790008
-                                                                        03800008
-* Message text .13                                                      03810008
-                                                                        03820008
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03830008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03840008
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03841008
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03842008
-         LA    R6,tmsgNamd          Get address of name                 03843008
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03844008
-         MVI   AxrArgNameLength,L'tmsgNamd                              03845008
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03846008
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03847008
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03848008
-         LH    R6,VARTLEN+24        Obtain length (in bytes)            03849008
-         ST    R6,AxrArgLength      Store length in var entry           03849108
-                                                                        03849208
-* Message text .14                                                      03849308
-                                                                        03849408
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03849508
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03849608
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03849708
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03849808
-         LA    R6,tmsgName          Get address of name                 03849908
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03850008
-         MVI   AxrArgNameLength,L'tmsgName                              03850108
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03850208
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03850308
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03850408
-         LH    R6,VARTLEN+26        Obtain length (in bytes)            03850508
-         ST    R6,AxrArgLength      Store length in var entry           03850608
-                                                                        03850708
-* Message text .15                                                      03850808
-                                                                        03850908
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03851008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03851108
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03851208
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03851308
-         LA    R6,tmsgNamf          Get address of name                 03851408
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03851508
-         MVI   AxrArgNameLength,L'tmsgNamf                              03851608
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03851708
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03851808
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03851908
-         LH    R6,VARTLEN+28        Obtain length (in bytes)            03852008
-         ST    R6,AxrArgLength      Store length in var entry           03852108
-                                                                        03852208
-* Message text .16                                                      03852308
-                                                                        03852408
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03852508
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03852608
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03852708
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03852808
-         LA    R6,tmsgNamg          Get address of name                 03852908
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03853008
-         MVI   AxrArgNameLength,L'tmsgNamg                              03853108
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03853208
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03853308
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03853408
-         LH    R6,VARTLEN+30        Obtain length (in bytes)            03853508
-         ST    R6,AxrArgLength      Store length in var entry           03853608
-                                                                        03853708
-* Message text .17                                                      03853808
-                                                                        03853908
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03854008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03854108
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03854208
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03854308
-         LA    R6,tmsgNamh          Get address of name                 03854408
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03854508
-         MVI   AxrArgNameLength,L'tmsgNamh                              03854608
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03854708
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03854808
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03854908
-         LH    R6,VARTLEN+32        Obtain length (in bytes)            03855008
-         ST    R6,AxrArgLength      Store length in var entry           03855108
-                                                                        03855208
-* Message text .18                                                      03855308
-                                                                        03855408
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03855508
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03855608
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03855708
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03855808
-         LA    R6,tmsgNami          Get address of name                 03855908
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03856008
-         MVI   AxrArgNameLength,L'tmsgNami                              03856108
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03856208
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03856308
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03856408
-         LH    R6,VARTLEN+34        Obtain length (in bytes)            03856508
-         ST    R6,AxrArgLength      Store length in var entry           03856608
-                                                                        03856708
-* Message text .19                                                      03856808
-                                                                        03856908
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03857008
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03857108
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03857208
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03857308
-         LA    R6,tmsgNamj          Get address of name                 03857408
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03857508
-         MVI   AxrArgNameLength,L'tmsgNamj                              03857608
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03857708
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03857808
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03857908
-         LH    R6,VARTLEN+36        Obtain length (in bytes)            03858008
-         ST    R6,AxrArgLength      Store length in var entry           03858108
-                                                                        03858208
-* Message text .20                                                      03858308
-                                                                        03858408
-         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry          03858508
-         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry                  03858608
-         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text    03858708
-         ST    R7,AXRARGADDRLOW     Store address in arglist            03858808
-         LA    R6,tmsgNamk          Get address of name                 03858908
-         ST    R6,AXRARGNameADDRLOW Store address of name of varible    03859008
-         MVI   AxrArgNameLength,L'tmsgNamk                              03859108
-         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable             03859208
-         MVI   AxrArgType,AxrArgTypeChar        Indicate char string    03859308
-*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)            03859408
-         LH    R6,VARTLEN+38        Obtain length (in bytes)            03859508
-         ST    R6,AxrArgLength      Store length in var entry           03859608
-                                                                        03859708
-         DROP  R8                                                       03859808
-         WTO   'MPF2REXX INVOKED',MCSFLAG=(HRDCPY)                      03859908
-                                                                        03860008
-* Call system rexx                                                      03860108
-                                                                        03860208
-         AXREXX REQUEST=EXECUTE,   Execute a rexx                      X03860308
-               SECURITY=BYAXRUSER, Run under ID in AXRUSER of AXRxx    X03860408
-               NAME=EXECNAME,      Name is stored in execname          X03860508
-               SYNC=NO,            Asyncrounous call                   X03860608
-               TSO=YES,            TSO environment                     X03860708
-               REXXVARS=RxVarLst,  Point to variable list              X03860808
-               REXXDIAG=RxAxrDiag, Diagnosis area                      X03860908
-               PLISTVER=MAX,       Largest possible AXREXX plist size  X03861008
-               RETCODE=OutRC,      Store return code                   X03862008
-               RSNCODE=OutRsn,     Store reason code                   X03863008
-               MF=(E,RXPLIST,COMPLETE)                                  03864008
-                                                                        03865008
-         LTR   R15,R15                                                  03866008
-         BNZ   FailLabel                                                03867008
-         USING AxrDiag,R9                                               03868008
-         LA    R9,RxAxrDiag                                             03869008
-         TM    AxrDiagFlgs1,AxrDiagNoExecRetCode                        03870008
-         BNZ   FailLabel                                                03880008
-         L     R15,AxrDiagExecRetCode                                   03890008
-         LTR   R15,R15                                                  03900008
-         BNZ   FailLabel                                                03910008
-                                                                        03920008
-* Cleanup                                                               03930008
-                                                                        03940008
-         LA    R1,WORKLEN                                               03950008
-         FREEMAIN R,LV=(R1),A=(R3),SP=230                               03960008
-         LTR   R15,R15             Free OK?                             03970008
-         BZ    RETURN              Yes-> Return                         03980008
-         WTO   'MPF2REXX FREEMAIN FAILED'                               03990008
-                                                                        04000008
-* Exit                                                                  04010008
-                                                                        04020008
-Return   DS    0h                                                       04030008
-         PR                             Restore callers regs            04040008
-                                                                        04050008
-* Perform error checking                                                04060008
-                                                                        04070008
-FailLabel DS   0H                                                       04080008
-                                                                        04090008
-         MVC   WTOPLIST(WTOLISTL),WTOLIST Move in WTO plist             04100008
-                                                                        04110008
-         UNPK  WTOPLIST+29(9),OutRC(5)  Unpack RC                       04120008
-         MVI   WTOPLIST+37,C' '         Clear old sign                  04130008
-         TR    WTOPLIST+29(8),TRTABLE   Convert to printable hex chars  04140008
-                                                                        04150008
-         UNPK  WTOPLIST+43(9),OutRsn(5) Unpack RSN code                 04160008
-         MVI   WTOPLIST+51,C' '         Clear old sign                  04170008
-         TR    WTOPLIST+43(8),TRTABLE   Convert to printable hex chars  04180008
-         WTO   MF=(E,WTOPLIST)                                          04190008
-         AGO   .SKIP                                                    04200008
-*                                                                       04210008
-* OUTPUT AXRDIAG CODES AS WELL - MCKOWN                                 04220008
-         MVC   WTOPLIST(WTOLISTL2),WTOLIST2                             04230008
-         UNPK  WTOPLIST+19(9),AXRDIAG1(5)                               04240008
-         TR    WTOPLIST+19(8),TRTABLE                                   04250008
-         MVI   WTOPLIST+27,C' '                                         04260008
-         UNPK  WTOPLIST+34(9),AXRDIAG2(5)                               04270008
-         TR    WTOPLIST+34(8),TRTABLE                                   04280008
-         MVI   WTOPLIST+42,C' '                                         04290008
-         UNPK  WTOPLIST+49(9),AXRDIAG3(5)                               04300008
-         TR    WTOPLIST+49(8),TRTABLE                                   04310008
-         MVI   WTOPLIST+57,C' '                                         04320008
-         UNPK  WTOPLIST+64(9),AXRDIAG4(5)                               04330008
-         TR    WTOPLIST+64(8),TRTABLE                                   04340008
-         MVI   WTOPLIST+72,C' '                                         04350008
-         WTO   MF=(E,WTOPLIST)                                          04360008
-.SKIP    ANOP                                                           04370008
-*                                                                       04380008
-                                                                        04390008
-         PR                                                             04400008
-                                                                        04410008
-* Local storage                                                         04420008
-                                                                        04430008
-NumVars  EQU   24                Total number of variables  @DM11032010 04440008
-ExtraFields EQU 4                Extra fields beyond wto lin@DM11032010 04450008
-tmsgNam0 DC    C'MPF2REXXMSG.0'                                         04460008
-tmsgNam1 DC    C'MPF2REXXMSG.1'                                         04470008
-tmsgNam2 DC    C'MPF2REXXMSG.2'                                         04480008
-tmsgNam3 DC    C'MPF2REXXMSG.3'                                         04490008
-tmsgNam4 DC    C'MPF2REXXMSG.4'                                         04500008
-tmsgNam5 DC    C'MPF2REXXMSG.5'                                         04510008
-tmsgNam6 DC    C'MPF2REXXMSG.6'                                         04520008
-tmsgNam7 DC    C'MPF2REXXMSG.7'                                         04530008
-tmsgNam8 DC    C'MPF2REXXMSG.8'                                         04540008
-tmsgNam9 DC    C'MPF2REXXMSG.9'                                         04550008
-tmsgNamA DC    C'MPF2REXXMSG.10'                                        04560008
-tmsgNamb DC    C'MPF2REXXMSG.11'                                        04570008
-tmsgNamc DC    C'MPF2REXXMSG.12'                                        04580008
-tmsgNamd DC    C'MPF2REXXMSG.13'                                        04590008
-tmsgName DC    C'MPF2REXXMSG.14'                                        04600008
-tmsgNamf DC    C'MPF2REXXMSG.15'                                        04610008
-tmsgNamg DC    C'MPF2REXXMSG.16'                                        04611008
-tmsgNamh DC    C'MPF2REXXMSG.17'                                        04612008
-tmsgNami DC    C'MPF2REXXMSG.18'                                        04613008
-tmsgNamj DC    C'MPF2REXXMSG.19'                                        04614008
-tmsgNamk DC    C'MPF2REXXMSG.20'                                        04615008
-jbnmName DC    C'MPF2REXXJOB'                                           04616008
-jbidName DC    C'MPF2REXXJID'                               @DM11032010 04617008
-sysnName DC    C'MPF2REXXSYS'                                           04618008
-WTOLIST  WTO   'MPF2REXX AXREXX ERROR RC XXXXXXXX  RSN XXXXXXXX',      X04619008
-               MF=L                                                     04620008
-WTOLISTL EQU   *-WTOLIST                                                04630008
-         AGO   .SKIP2                                                   04640008
-WTOLIST2 WTO   'MPF2REXX DIAG1 XXXXXXXX DIAG2 XXXXXXXX DIAG3 XXXXXXXX DI04650008
-               IAG4 XXXXXXXX',                                         X04660008
-               MF=L                                                     04660108
-WTOLISTL2 EQU  *-WTOLIST2                                               04660208
-.SKIP2   ANOP                                                           04660308
-* TR table for decoding hex values                                      04660408
-         ORG   *-240                                                    04660508
-TRTABLE  EQU   *                                                        04660608
-         DS    CL240                                                    04660708
-         DC    C'0123456789ABCDEF'                                      04660808
-         ORG   ,                                                        04660908
-* TRT table for finding length of fields                                04661008
-TRTTAB   DC    256X'FF'           All values invalid                    04662008
-         ORG   TRTTAB+C'#'                                              04663008
-         DC    1X'00'             #                                     04664008
-         ORG   TRTTAB+C'$'                                              04665008
-         DC    1X'00'             $                                     04666008
-         ORG   TRTTAB+C'@'                                              04667008
-         DC    1X'00'             @                                     04668008
-         ORG   TRTTAB+C'A'                                              04669008
-         DC    9X'00'             ABCDEFGHI                             04670008
-         ORG   TRTTAB+C'J'                                              04680008
-         DC    9X'00'             JKLMNOPQR                             04690008
-         ORG   TRTTAB+C'S'                                              04700008
-         DC    8X'00'             STUVWXYZ                              04710008
-         ORG   TRTTAB+C'0'                                              04711008
-         DC    10X'00'            0123456789                            04712008
-         ORG   ,                                                        04713008
-                                                                        04714008
-* Work area DSECT                                                       04715008
-                                                                        04716008
-WORKDS   DSECT                                                          04717008
-Nextwrk  DS    F                        Ptr to next work area           04718008
-Seqno    DS    F                        Sequence number                 04719008
-SAVEAREA DS    18F                      Reg save area                   04720008
-DWORD    DS    D                        Doubleword                      04730008
-NumMin   DS    F                        Number of Minor lines           04740008
-NumMinC  DS    C                                                        04750008
-ExecName DS    CL8                      Exec Name                       04760008
-RxVarLst DS    CL(AXRARGLST_LEN)        Variable List                   04770008
-RxVarEnt DS    24CL(AXRARGENTRY_LEN)    Varible entries                 04780008
-*xVarEnt DS    CL(AXRARGENTRY_LEN*NumVars)    Varible entries           04790008
-RxAxrDiag DS   CL(AXRDIAG_LEN)          Diagnostic area                 04800008
-VARTMSG  DS    CL(L'CTXTTMSG)           message text                    04810008
-MinLines DS    19CL(L'CTXTTMSG)         19 more minor lines             04820008
-VARTLEN  DS    H                        Length of Line                  04830008
-MinLens  DS    19H                      19 more lengths                 04831008
-VARJBNM  DS    CL(L'CTXTJBNM)           job issuing message             04832008
-VARSYSN  DS    CL(L'CTXTSYSN)           System issuing message          04833008
-VARJBID  DS    CL(L'CTXTOJBID)          Job ID              @DM11032010 04834008
-OutRC    DS    F                        Return code from axrexx         04835008
-         DS    C                        Pad char                        04836008
-OutRsn   DS    F                        Reason code                     04837008
-         DS    C                        Pad char                        04838008
-         AXREXX PLISTVER=MAX,MF=(L,RXPLIST)                             04839008
-WTOPLIST WTO   'MPF2REXX AXREXX ERROR RC XXXXXXXX  RSN XXXXXXXX ',     X04840008
-               MF=L                                                     04850008
-         AGO   .SKIP3                                                   04860008
-WTOPLIST WTO   'MPF2REXX DIAG1 XXXXXXXX DIAG2 XXXXXXXX DIAG3 XXXXXXXX DI04870008
-               IAG4 XXXXXXXX',                                         X04880008
-               MF=L                                                     04890008
-.SKIP3   ANOP                                                           04900008
-WORKLEN  EQU   *-WORKDS                                                 04910008
-                                                                        04920008
-* Other DSECTS                                                          04930008
-                                                                        04940008
-         EJECT                                                          04950008
-         IEZVX100                       CTXT                            04951008
-         AXRZARG DSECT=YES,AXRARGLST=YES,AXRARGENTRY=YES,AXRDIAG=YES    04952008
-         IHAASCB DSECT=YES                                              04953008
-         IRAOUCB DSECT=YES                                              04954008
-         IHAPSA  DSECT=YES                                              04955008
-         EJECT                                                          04956008
-         END   MPF2REXX                                                 04957008
+MPF2REXX TITLE '- MPF exit to call SYSTEM REXX'
+         PRINT GEN
+***********************************************************************
+*                                                                     *
+* Name: MPF2REXX                                                      *
+*                                                                     *
+*      Author: Dana Mitchell   dmitche@shazam.net                     *
+*                                                                     *
+* Descritpion: MPF Installation exit to process WTO                   *
+*              messages using SYSTEM REXX execs                       *
+*                                                                     *
+*   Operation: Call a SYSTEM REXX EXEC when the specfied message      *
+*              is issued.  The default name of the SYSREXX to be      *
+*              called is the message identifier.  If an alternate     *
+*              REXX is to be called, specify AUTO(rexxname) on the    *
+*              MPFLSTxx statement.                                    *
+*                                                                     *
+*              Sample MPFLSTxx statements:                            *
+*                                                                     *
+*              msgid,USEREXIT(MPF2REXX)                               *
+*                                                                     *
+*                    When <msgid> message is issued,  call a System   *
+*                    Rexx with the name of <msgid>.                   *
+*                                                                     *
+*              msgid,USEREXIT(MPF2REXX),AUTO(altrexx)                 *
+*                                                                     *
+*                    When <msgid> message is issued,  call a System   *
+*                    Rexx with the name of <altrexx>.                 *
+*                                                                     *
+*       Input: R1->  Address of CTXT                                  *
+*              R13-> Standard save area                               *
+*              R14-> Return address                                   *
+*              R15-> Entry point                                      *
+*                                                                     *
+*   Regs used: R2 R6 and R7 work                                      *
+*              R3  Ptr to WORKDS   workarea                           *
+*              R4  Ptr to CTXTATTR                                    *
+*              R5  Ptr to CTXT                                        *
+*              R12 Base                                               *
+*              R13 Register save area                                 *
+*              R14 Return address                                     *
+*                                                                     *
+* Fields passed to REXX exec:                                         *
+*                                                                     *
+*              MPF2REXXJOB     Job name of issuer                     *
+*              MPF2REXXJID     Job ID of issuer            @DM11032010*
+*              MPF2REXXSYS     System name where message originated   *
+*              MPF2REXXMSG.0   Number of lines returned               *
+*              MPF2REXXMSG.x   Where x= 1-20 lines of WTO text        *
+*                                                                     *
+*                                                                     *
+*                                                                     *
+* Change Log                                                          *
+* ------------------------------------------------------------------- *
+* Mitchell  9/22/2010 Initial coding                                  *
+*                                                                     *
+* Mitchell 10/22/2010 Insert test for valid System Rexx environment.  *
+*  AXREXX macro fails w/RC 0000000C  RSN 041E0C0F if the AS issuing   *
+*  the message is not valid for creation of a dependant enclave.      *
+*  Check for  OUCBIac>0                                               *
+*                                                                     *
+* Mitchell @DM11032010 Add CTXTOJBID field passed to REXX             *
+* Mitchell @DM11112010 Set actual length of MPF2REXXJOB and 'SYS      *
+*                      fields.                                        *
+*                                                                     *
+***********************************************************************
+MPF2REXX CSECT
+MPF2REXX AMODE 31                      31-BIT ADDRESSING MODE
+MPF2REXX RMODE ANY                     31-BIT RESIDENCE
+
+* Registers
+
+R0       EQU   0
+R1       EQU   1             TRT
+R2       EQU   2             TRT
+R3       EQU   3             Work area (dynamic storage)
+R4       EQU   4             CTXTATTR
+R5       EQU   5             CTXT
+R6       EQU   6             Work
+R7       EQU   7             Work
+R8       EQU   8             Work for REXX areas
+R9       EQU   9
+R10      EQU   10
+R11      EQU   11
+R12      EQU   12            BASE
+R13      EQU   13            Save area
+R14      EQU   14
+R15      EQU   15
+
+* Setup Entry Linkage
+
+         USING *,R12                    Tell assembler
+         BAKR  R14,0                    Save regs
+         LAE   R12,0(,R15)              Load base
+         B     Begin                    Branch around eyecatchers
+         DC    C'MPF2REXX '
+         DC    C'&SYSDATE &SYSTIME '
+Begin    DS    0H
+         L     R5,0(R1)                 Get poitner to CTXT
+         USING CTXT,R5                  use R5
+
+         TM    CTXTSFB4,CTXTCIDA        Is this termination call?
+         BO    Return                   Yes-> return
+
+* Determine type of call
+
+         L     R4,CTXTTXPN              Load pointer to minor line
+         LTR   R4,R4                    Is there a minor line?
+         BNZ   MinorLine                Yes-> Go process minor line
+
+* Check for valid environment                               @DM10222010
+
+         B     EnvOK          **** Don't check Environment ****
+
+         USING PSA,R0              Point to PSA             @DM10222010
+         L     R6,PSAAOLD          Point to Current ASCB    @DM10222010
+         USING ASCB,R6             Use pointer to ASCB      @DM10222010
+         L     R6,ASCBOUCB         Point to OUCB            @DM10222010
+         Drop  R6                  Reg is now pointing to OU@DM10222010
+         USING OUCB,R6             Tell assembler           @DM10222010
+         CLI   OUCBIAC,x'00'       Is OUCBIAC>0?            @DM10222010
+         BH    EnvOK               Yes-> Continue           @DM10222010
+         WTO   'MPF2REXX Invalid environment for System REXX'
+         B     Return                                       @DM10222010
+         Drop  R6                                           @DM10222010
+
+* Getmain workarea
+
+EnvOK    DS    0H                                           @DM10222010
+         GETMAIN RU,LV=WORKLEN,SP=230,LOC=(BELOW,ANY)
+         LTR   R15,R15             Getmain OK?
+         BZ    GM1OK               Yes-> continue
+         WTO   'MPF2REXX Getmain Error'
+         B     Return              Bye
+
+GM1OK    DS    0H
+         LR    R3,R1               Get address of storage
+         USING WORKDS,R3           Tell assembler
+         LA    R13,SAVEAREA        Point to save area
+         MVC   SAVEAREA+4,=C'F1SA' Mark stack in use
+
+* Save various fixed fields from the message header
+
+         MVC   NumMin,=F'1'        Set beginning number of lines
+         L     R4,CTXTTXPJ         Load address of ptr to text
+         USING CTXTATTR,R4         Use this for the base
+         MVC   VARTMSG,CTXTTMSG    Move in message text
+         MVC   VARTLEN,CTXTTLEN    Get Length of message text
+         MVC   VARJBNM,CTXTJBNM    Move in JOB name
+         MVC   VARJBID,CTXTOJBID   Move in JOB ID           @DM11032010
+         MVC   VARSYSN,CTXTSYSN    Move in system name
+
+* Get name of exec
+
+         MVC   EXECNAME(8),CTXTTMSG  Move in first 8 chars of text
+         CLC   CTXTAUTT,=CL8' '      Is any token specified?
+         BNH   Defname               No-> use name from message text
+         MVC   EXECNAME,CTXTAUTT     Move in name from auto token
+Defname  DS    0H
+
+* Determine type of line
+
+         TM    CTXTTFB1,CTXTTFMJ   Is this a MLWTO?
+         BZ    BuildRexx           No-> go build SYSREXX call
+         TM    CTXTTFB1,CTXTTFME   Is this the last line?
+         BO    BuildRexx           Yes-> go build SYSREXX call
+
+* Chain workarea
+
+         MVC   Seqno,CTXTSEQN      Save sequence number of this MSG
+         L     R15,CTXTIWKP        Point to exit work area
+
+AddWork  DS    0h
+
+         XR    R1,R1               Clear work reg
+         CS    R1,R3,0(R15)        Add pointer to chain OK?
+         BE    ReqMinors           Yes-> go get more minors
+         LR    R15,R1              No-> point to next minor block
+         B     AddWork             Go try adding the next block
+
+ReqMinors DS   0H
+
+         OI    CTXTRFB1,CTXTRPML   Request more minors if available
+         B     Return              Go back
+
+* Process Minor Line
+
+MinorLine DS    0H
+
+         NI    CTXTRFB1,255-CTXTRPML Turn off request bit
+         L     R3,CTXTIWKP          Get pointer to exit work area
+
+TryNext  DS    0H
+
+         L     R3,0(R3)             Get pointer to first/next work area
+         LTR   R3,R3                Is there a work area exist?
+         BNZ   WorkOK               Yes-> See if its the right one
+         WTO   'MPF2REXX No workarea found for minor'
+         B     Return               Go Back
+
+WorkOK   Ds    0H
+
+         CLC   Seqno,CTXTSEQN       Is this the right one?
+         Bne   TryNext              No-> try the next one
+
+* Store message line in work area
+
+         LA    R6,VARTMSG           Point to line array
+         L     R8,NumMin            Get number of minor lines
+         CH    R8,=H'20'            Max minor lines reached?
+         BNL   MinFull              Yes-> Dont add to buffer
+         MH    R8,=AL2(L'CTXTTMSG)  Find index into table
+         AR    R6,R8                Point to next entry
+         MVC   0(L'CTXTTMSG,R6),CTXTTMSG  Move in message text
+         L     R8,NumMin            Get number of minor lines
+         SLA   R8,1                 Multiply by 2
+         LA    R6,VARTLEN(R8)       Point to length entry
+         MVC   0(2,R6),CTXTTLEN     Save length of message
+         L     R8,NumMin            Get number of minor lines
+         LA    R8,1(,R8)            Increment number of minors
+         ST    R8,NumMin            Store number of minors
+
+         TM    CTXTTFB1,CTXTTFME    Is this the END line?
+         BZ    ReqMinors            No-> Go get more
+
+MinFull  DS    0H
+* Remove workarea from chain
+
+         L     R1,CTXTIWKP          Point to exit workarea
+
+RemWork  DS    0H
+
+         LR    R15,R3               Point to our workarea
+         L     R14,NextWrk          Load pointer to next one
+         CS    R15,R14,0(R1)        Try Removing chain
+         BE    BuildRexx            Yes-> Go build REXX request
+         LR    R1,R15               No-> Point to next one
+         B     RemWork              Go try to remove it
+
+* Begin building SYSTEM REXX call areas
+
+BuildRexx DS   0H
+
+         XC    RxVarLst,RxVarLst    Clear the VarLst header
+         LA    R8,RxVarLst
+
+* Build headers
+
+         USING AxrArgLst,R8
+         MVC   AxrArgLstId,=A(AxrVarLstAcro) Set it to varible type
+         MVC   AxrArgLstVer,=A(AxrArgLstCurVer) Set it to version
+         L     R6,NumMin           Get number of wto lines
+         LA    R6,ExtraFields(,R6) Add more fields to count
+         STH   R6,AxrArgLstNumber  Store the number of variables
+         DROP  R8
+
+* Prepare variable entries
+
+        LA     R8,RxVarEnt          Point to first entry
+        USING  AxrArgEntry,R8
+
+* Job name
+
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R6,jbnmName          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'jbnmName
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+         LA    R6,L'VARJBNM         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+         LA    R6,VARJBNM           Get address of Job name
+         ST    R6,AXRARGADDRLOW     Store address in arglist
+         TRT   VARJBNM,TRTTAB       Find length of JOB name @DM11112010
+         BZ    DefJOB               Job name is default leng@DM11112010
+         SR    R1,R6                Calculate length        @DM11112010
+         ST    R1,AxrArgLength      Store length            @DM11112010
+DefJOB   DS    0H                                           @DM11112010
+
+* Job ID
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R6,VARJBID           Get address of Job ID
+         ST    R6,AXRARGADDRLOW     Store address in arglist
+         LA    R6,jbidName          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'jbidName
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+         LA    R6,L'VARJBID         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* System name
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R6,sysnName          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'sysnName store length of name
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+         LA    R6,L'VARSYSN         Plug in default length
+         ST    R6,AxrArgLength      Store length in var entry
+         LA    R6,VARSYSN           Get address of System name
+         ST    R6,AXRARGADDRLOW     Store address in arglist
+         TRT   VARSYSN,TRTTAB       Find length of System na@DM11112010
+         BZ    DefSYS               Default length          @DM11112010
+         SR    R1,R6                Calculate length        @DM11112010
+         ST    R1,AxrArgLength      Store length            @DM11112010
+DefSYS   DS    0H                                           @DM11112010
+
+* Message text .0
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8)  Clear entry
+         LA    R6,NumMin            Get address of varable
+         ST    R6,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam0          get address of variable name
+         ST    R6,AXRARGNameADDRLOW Store address of name
+         MVI   AxrArgNameLength,L'tmsgNam0
+         OI    AXRARGINPUTFLGS1,AXRARGInput   input varible
+         MVI   AxrArgType,AXRARGTYPEUNSIGNED  type is unsigned binary
+         LA    R6,L'NumMin          Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .1
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,VARTMSG           Get address of message text line
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam1          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam1
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+0         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .2
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam2          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam2
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+2         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .3
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam3          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam3
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+4         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .4
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam4          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam4
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+6         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .5
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam5          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam5
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+8         Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .6
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam6          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam6
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+10        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .7
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam7          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam7
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+12        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .8
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam8          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam8
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+14        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .9
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNam9          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNam9
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+16        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .10
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamA          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamA
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+18        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .11
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamb          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamb
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+20        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .12
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamc          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamc
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+22        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .13
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamd          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamd
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+24        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .14
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgName          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgName
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+26        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .15
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamf          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamf
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+28        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .16
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamg          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamg
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+30        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .17
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamh          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamh
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+32        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .18
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNami          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNami
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+34        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .19
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamj          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamj
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+36        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+* Message text .20
+
+         LA    R8,AXRARGENTRY_LEN(,R8)     Point to next entry
+         XC    0(AXRARGENTRY_LEN,R8),0(R8) Clear entry
+         LA    R7,L'CTXTTMSG(,R7) Point to next line of message text
+         ST    R7,AXRARGADDRLOW     Store address in arglist
+         LA    R6,tmsgNamk          Get address of name
+         ST    R6,AXRARGNameADDRLOW Store address of name of varible
+         MVI   AxrArgNameLength,L'tmsgNamk
+         OI    AXRARGINPUTFLGS1,AXRARGInput  Input variable
+         MVI   AxrArgType,AxrArgTypeChar        Indicate char string
+*        LA    R6,L'CTXTTMSG        Obtain length (in bytes)
+         LH    R6,VARTLEN+38        Obtain length (in bytes)
+         ST    R6,AxrArgLength      Store length in var entry
+
+         DROP  R8
+         WTO   'MPF2REXX INVOKED',MCSFLAG=(HRDCPY)
+
+* Call system rexx
+
+         AXREXX REQUEST=EXECUTE,   Execute a rexx                      X
+               SECURITY=BYAXRUSER, Run under ID in AXRUSER of AXRxx    X
+               NAME=EXECNAME,      Name is stored in execname          X
+               SYNC=NO,            Asyncrounous call                   X
+               TSO=YES,            TSO environment                     X
+               REXXVARS=RxVarLst,  Point to variable list              X
+               REXXDIAG=RxAxrDiag, Diagnosis area                      X
+               PLISTVER=MAX,       Largest possible AXREXX plist size  X
+               RETCODE=OutRC,      Store return code                   X
+               RSNCODE=OutRsn,     Store reason code                   X
+               MF=(E,RXPLIST,COMPLETE)
+
+         LTR   R15,R15
+         BNZ   FailLabel
+         USING AxrDiag,R9
+         LA    R9,RxAxrDiag
+         TM    AxrDiagFlgs1,AxrDiagNoExecRetCode
+         BNZ   FailLabel
+         L     R15,AxrDiagExecRetCode
+         LTR   R15,R15
+         BNZ   FailLabel
+
+* Cleanup
+
+         LA    R1,WORKLEN
+         FREEMAIN R,LV=(R1),A=(R3),SP=230
+         LTR   R15,R15             Free OK?
+         BZ    RETURN              Yes-> Return
+         WTO   'MPF2REXX FREEMAIN FAILED'
+
+* Exit
+
+Return   DS    0h
+         PR                             Restore callers regs
+
+* Perform error checking
+
+FailLabel DS   0H
+
+         MVC   WTOPLIST(WTOLISTL),WTOLIST Move in WTO plist
+
+         UNPK  WTOPLIST+29(9),OutRC(5)  Unpack RC
+         MVI   WTOPLIST+37,C' '         Clear old sign
+         TR    WTOPLIST+29(8),TRTABLE   Convert to printable hex chars
+
+         UNPK  WTOPLIST+43(9),OutRsn(5) Unpack RSN code
+         MVI   WTOPLIST+51,C' '         Clear old sign
+         TR    WTOPLIST+43(8),TRTABLE   Convert to printable hex chars
+         WTO   MF=(E,WTOPLIST)
+         AGO   .SKIP
+*
+* OUTPUT AXRDIAG CODES AS WELL - MCKOWN
+         MVC   WTOPLIST(WTOLISTL2),WTOLIST2
+         UNPK  WTOPLIST+19(9),AXRDIAG1(5)
+         TR    WTOPLIST+19(8),TRTABLE
+         MVI   WTOPLIST+27,C' '
+         UNPK  WTOPLIST+34(9),AXRDIAG2(5)
+         TR    WTOPLIST+34(8),TRTABLE
+         MVI   WTOPLIST+42,C' '
+         UNPK  WTOPLIST+49(9),AXRDIAG3(5)
+         TR    WTOPLIST+49(8),TRTABLE
+         MVI   WTOPLIST+57,C' '
+         UNPK  WTOPLIST+64(9),AXRDIAG4(5)
+         TR    WTOPLIST+64(8),TRTABLE
+         MVI   WTOPLIST+72,C' '
+         WTO   MF=(E,WTOPLIST)
+.SKIP    ANOP
+*
+
+         PR
+
+* Local storage
+
+NumVars  EQU   24                Total number of variables  @DM11032010
+ExtraFields EQU 4                Extra fields beyond wto lin@DM11032010
+tmsgNam0 DC    C'MPF2REXXMSG.0'
+tmsgNam1 DC    C'MPF2REXXMSG.1'
+tmsgNam2 DC    C'MPF2REXXMSG.2'
+tmsgNam3 DC    C'MPF2REXXMSG.3'
+tmsgNam4 DC    C'MPF2REXXMSG.4'
+tmsgNam5 DC    C'MPF2REXXMSG.5'
+tmsgNam6 DC    C'MPF2REXXMSG.6'
+tmsgNam7 DC    C'MPF2REXXMSG.7'
+tmsgNam8 DC    C'MPF2REXXMSG.8'
+tmsgNam9 DC    C'MPF2REXXMSG.9'
+tmsgNamA DC    C'MPF2REXXMSG.10'
+tmsgNamb DC    C'MPF2REXXMSG.11'
+tmsgNamc DC    C'MPF2REXXMSG.12'
+tmsgNamd DC    C'MPF2REXXMSG.13'
+tmsgName DC    C'MPF2REXXMSG.14'
+tmsgNamf DC    C'MPF2REXXMSG.15'
+tmsgNamg DC    C'MPF2REXXMSG.16'
+tmsgNamh DC    C'MPF2REXXMSG.17'
+tmsgNami DC    C'MPF2REXXMSG.18'
+tmsgNamj DC    C'MPF2REXXMSG.19'
+tmsgNamk DC    C'MPF2REXXMSG.20'
+jbnmName DC    C'MPF2REXXJOB'
+jbidName DC    C'MPF2REXXJID'                               @DM11032010
+sysnName DC    C'MPF2REXXSYS'
+WTOLIST  WTO   'MPF2REXX AXREXX ERROR RC XXXXXXXX  RSN XXXXXXXX',      X
+               MF=L
+WTOLISTL EQU   *-WTOLIST
+         AGO   .SKIP2
+WTOLIST2 WTO   'MPF2REXX DIAG1 XXXXXXXX DIAG2 XXXXXXXX DIAG3 XXXXXXXX DI
+               IAG4 XXXXXXXX',                                         X
+               MF=L
+WTOLISTL2 EQU  *-WTOLIST2
+.SKIP2   ANOP
+* TR table for decoding hex values
+         ORG   *-240
+TRTABLE  EQU   *
+         DS    CL240
+         DC    C'0123456789ABCDEF'
+         ORG   ,
+* TRT table for finding length of fields
+TRTTAB   DC    256X'FF'           All values invalid
+         ORG   TRTTAB+C'#'
+         DC    1X'00'             #
+         ORG   TRTTAB+C'$'
+         DC    1X'00'             $
+         ORG   TRTTAB+C'@'
+         DC    1X'00'             @
+         ORG   TRTTAB+C'A'
+         DC    9X'00'             ABCDEFGHI
+         ORG   TRTTAB+C'J'
+         DC    9X'00'             JKLMNOPQR
+         ORG   TRTTAB+C'S'
+         DC    8X'00'             STUVWXYZ
+         ORG   TRTTAB+C'0'
+         DC    10X'00'            0123456789
+         ORG   ,
+
+* Work area DSECT
+
+WORKDS   DSECT
+Nextwrk  DS    F                        Ptr to next work area
+Seqno    DS    F                        Sequence number
+SAVEAREA DS    18F                      Reg save area
+DWORD    DS    D                        Doubleword
+NumMin   DS    F                        Number of Minor lines
+NumMinC  DS    C
+ExecName DS    CL8                      Exec Name
+RxVarLst DS    CL(AXRARGLST_LEN)        Variable List
+RxVarEnt DS    24CL(AXRARGENTRY_LEN)    Varible entries
+*xVarEnt DS    CL(AXRARGENTRY_LEN*NumVars)    Varible entries
+RxAxrDiag DS   CL(AXRDIAG_LEN)          Diagnostic area
+VARTMSG  DS    CL(L'CTXTTMSG)           message text
+MinLines DS    19CL(L'CTXTTMSG)         19 more minor lines
+VARTLEN  DS    H                        Length of Line
+MinLens  DS    19H                      19 more lengths
+VARJBNM  DS    CL(L'CTXTJBNM)           job issuing message
+VARSYSN  DS    CL(L'CTXTSYSN)           System issuing message
+VARJBID  DS    CL(L'CTXTOJBID)          Job ID              @DM11032010
+OutRC    DS    F                        Return code from axrexx
+         DS    C                        Pad char
+OutRsn   DS    F                        Reason code
+         DS    C                        Pad char
+         AXREXX PLISTVER=MAX,MF=(L,RXPLIST)
+WTOPLIST WTO   'MPF2REXX AXREXX ERROR RC XXXXXXXX  RSN XXXXXXXX ',     X
+               MF=L
+         AGO   .SKIP3
+WTOPLIST WTO   'MPF2REXX DIAG1 XXXXXXXX DIAG2 XXXXXXXX DIAG3 XXXXXXXX DI
+               IAG4 XXXXXXXX',                                         X
+               MF=L
+.SKIP3   ANOP
+WORKLEN  EQU   *-WORKDS
+
+* Other DSECTS
+
+         EJECT
+         IEZVX100                       CTXT
+         AXRZARG DSECT=YES,AXRARGLST=YES,AXRARGENTRY=YES,AXRDIAG=YES
+         IHAASCB DSECT=YES
+         IRAOUCB DSECT=YES
+         IHAPSA  DSECT=YES
+         EJECT
+         END   MPF2REXX
